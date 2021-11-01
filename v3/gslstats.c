@@ -3,6 +3,8 @@
 #include <numpy/arrayobject.h>
 #include "stats.h"
 
+void copy_column(PyArrayObject *obj, double *dest, int col);
+void capsule_cleanup(PyObject *capsule);
 static char module_docstring[] = "GSL Statistics module";
 static char t_test_docstring[] = "Perform an independent samples t-test";
 static char ttest_all_docstring[] = "Perform independent samples t-test between every pair of groups";
@@ -47,34 +49,76 @@ static PyObject *ttest_all(PyObject *self, PyObject *args)
         return NULL;
     }
 
-    // Create output array
+    // Allocate vectors to hold group data
+    double *x = malloc((array->dimensions[0]) * sizeof(double));
+    double *y = malloc((array->dimensions[0]) * sizeof(double));
+    
+    // Allocate output
+    int nobs = array->dimensions[0];
     int ngroups = array->dimensions[1];
+    double *out = malloc(ngroups * ngroups * sizeof(double));
     int odims[2] = {ngroups, ngroups};
-    //PyObject *out = PyArray_FromDims(2, odims, PyArray_DOUBLE);
+    npy_intp dims[] = {(npy_intp) ngroups, (npy_intp) ngroups};
+    //PyArrayObject *result = (PyArrayObject *) PyArray_FromDims(2, odims, NPY_DOUBLE);
+    //double *result_data = (double *) result->data;
 
     // Now do t-tests between each pair of groups
+    int idx = 0;
     for (int i = 0; i < ngroups; i++) {
+        out[(i*odims[0]) + i] = 0;
+        copy_column(array, x, i);
         // Get group i slice
-        PyObject* slice_xi = PySlice_New(NULL, NULL, NULL);
-        //PyObject* slice_yi = PySlice_New(PyLong_FromLong(0), PyLong_FromLong(array->dimensions[1]), NULL);
-        PyObject* slice_yi = PyInt_FromLong(0);
-        PyObject* slices_i = PyTuple_Pack(2, slice_xi, slice_yi);
-        PyArrayObject* xdata = PyObject_GetItem(input, slices_i);
-        double *x = (double *) xdata->data;
-        for (int j = 0; j < array->dimensions[1]; j++) {
-            printf("%lf\n", x[j]);
-        }
+        //PyObject* slice_xi = PySlice_New(NULL, NULL, NULL);
+        //PyObject* slice_yi = PyLong_FromLong(0);
+        //PyObject* slices_i = PyTuple_Pack(2, slice_xi, slice_yi);
+        //PyArrayObject* xdata = PyObject_GetItem(input, slices_i);
+        //double *x = (double *) xdata->data;
+        //for (int j = 0; j < array->dimensions[1]; j++) {
+        //    printf("%lf\n", x[j]);
+        //}
         for (int j = i+1; j < ngroups; j++) {
+            copy_column(array, y, j);
+            double res = ttest_equalvar(x, nobs, y, nobs);
+            out[(i * odims[0]) + j] = res;
+            out[(j * odims[0]) + i] = res;
             // Get next group slice
-            PyObject* slice_xj = PySlice_New(NULL, NULL, NULL);
-            PyObject* slice_yj = PySlice_New(PyLong_FromLong(0), PyLong_FromLong(array->dimensions[1]), NULL);
-            PyObject* slices_j = PyTuple_Pack(2, slice_xj, slice_yj);
-            PyArrayObject* ydata = PyObject_GetItem((PyObject *) array, slices_j);
-            double *y = (double *) ydata->data;
+            //PyObject* slice_xj = PySlice_New(NULL, NULL, NULL);
+            //PyObject* slice_yj = PySlice_New(PyLong_FromLong(0), PyLong_FromLong(array->dimensions[1]), NULL);
+            //PyObject* slices_j = PyTuple_Pack(2, slice_xj, slice_yj);
+            //PyArrayObject* ydata = PyObject_GetItem((PyObject *) array, slices_j);
+            //double *y = (double *) ydata->data;
         }
     }
-    return Py_BuildValue("d", 1);
+    free(x);
+    free(y);
+    // Build Output
+    PyObject *res = PyArray_SimpleNewFromData(2, dims, NPY_DOUBLE, (void *) out);
+    PyObject *capsule = PyCapsule_New(out, NULL, capsule_cleanup);
+    PyArray_SetBaseObject((PyArrayObject *) res, capsule);
+    return PyArray_Return(res);
 }
+
+void capsule_cleanup(PyObject *capsule) {
+    void *memory = PyCapsule_GetPointer(capsule, NULL);
+    // I'm going to assume your memory needs to be freed with free().
+    // If it needs different cleanup, perform whatever that cleanup is
+    // instead of calling free().
+    free(memory);
+}
+
+void copy_column(PyArrayObject *obj, double *dest, int col)
+{
+    double *data = (double *) PyArray_DATA(obj);
+    
+    long *dims = (long *) obj->dimensions;
+    for (long i = 0; i < dims[0]; i++)
+    {
+        dest[i] = data[(i * dims[1]) + (long) col];
+    }
+    return;
+}
+
+
 
 static PyObject *_py_ttest(PyObject *self, PyObject *args)
 {
