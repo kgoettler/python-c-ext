@@ -2,3 +2,4 @@ temp.macosx*
 .DS_Store
 *.so
 *.dylib
+__pycache__
